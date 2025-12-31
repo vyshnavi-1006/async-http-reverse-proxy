@@ -1,28 +1,44 @@
 # Custom HTTP Reverse Proxy and Load Balancer
 
-A simple **async reverse proxy** built using **aiohttp** that forwards incoming HTTP requests to multiple backend servers using **round-robin load balancing**.
+A production-style async **reverse proxy built using aiohttp** that **forwards incoming HTTP requests to multiple backend servers** using **round-robin load balancing**, with **health checks**, **retries**, **metrics**, and **graceful shutdown**.
 
-This project helps to understand how reverse proxies work internally (similar to Nginx / AWS ALB).
+This project is designed to understand how reverse proxies work internally (similar to Nginx or AWS ALB) by implementing the core ideas.
 
 ---
 
 ## What this project does
 
-- Listens for client requests on **port 8080**
-- **Forwards requests** to backend servers
-- Distributes requests using **round-robin**
-- **Retries** on backend failure
-- Logs **requests**, **failures**, and **latency**
+- Listens for client requests on a **configurable proxy port**
+- **Forwards requests** to multiple backend servers
+- Distributes traffic using **round-robin load balancing**
+- **Retries requests** on backend failure or timeout
+- Tracks **backend health status** with failure thresholds
+- Temporarily **removes unhealthy backends using a **cooldown mechanism**
+- Automatically retries backends after **cooldown expiry**
+- Exposes **Prometheus metrics** for observability
+- Performs **graceful shutdown with in-flight request draining**
+- Logs **requests, retries, failures, latency, and state changes**
 
 ---
 
 ## How it works
 
-- The proxy receives a request
-- Selects a backend using round-robin
-- Forwards the request to the backend
-- Returns the backend response to the client
-- If a backend is down, it retries with the next one
+- The proxy receives an incoming HTTP request
+- A backend is selected using round-robin scheduling
+- The request is forwarded asynchronously to the backend
+- The backend response is returned to the client
+- If a backend times out or fails:
+  - The failure is recorded
+  - The request is retried on another backend
+- If a backend fails repeatedly:
+  - It is marked unhealthy
+  - Temporarily skipped using a cooldown timer
+- After the cooldown expires:
+  - The backend is retried automatically
+- Metrics are continuously exposed for monitoring
+- On shutdown:
+  - New requests are rejected
+  - In-flight requests are allowed to complete
 
 ---
 
@@ -47,16 +63,47 @@ curl http://127.0.0.1:8080
 You should see responses alternating between different backends, indicating load balancing.
 
 ### 4. Simulate backend failure
-- Stop one backend server (for example, terminate backend1)
+- Stop one backend server (for example, backend2)
 - Continue sending requests:
 ```bash
 curl http://127.0.0.1:8080
 ```
 
-- The proxy will automatically route requests only to the healthy backend.
-- Logs will show backend failure detection and retry behavior.
+Expected behavior:
+- Requests are automatically routed to the healthy backend
+- Failures and retries are logged
+- After repeated failures, the backend is marked unhealthy
+- The backend is skipped during the cooldown period
+- After cooldown expiry, the proxy retries the backend automatically and ensures continued service.
 
-This demonstrates how the proxy handles backend unavailability and ensures continued service.
+---
+
+## Graceful shutdown
+
+When the proxy receives a shutdown signal (CTRL+C):
+- New requests are rejected with 503 Service Unavailable
+- Existing in-flight requests are allowed to complete
+- Background tasks are stopped cleanly
+- The server exits without dropping active connections
+This simulates real-world production shutdown behavior.
+
+---
+
+## Observability & Metrics
+
+The proxy exposes Prometheus metrics on a separate metrics server.
+- Metrics endpoint runs on port 8000
+- Metrics include:
+  - Total requests per backend
+  - Failed requests per backend
+  - Request latency histograms
+  - Python runtime metrics
+
+Example:
+```bash
+curl http://127.0.0.1:8000
+```
+These metrics can be scraped by Prometheus and visualized using Grafana.
 
 ---
 
@@ -64,15 +111,25 @@ This demonstrates how the proxy handles backend unavailability and ensures conti
 
 - Logs are written to the `logs/` directory when `LOG_DIR=logs` is configured in the `.env` file.
 - Separate loggers are maintained for the proxy server and each backend service.
+- Logs include:
+  - Request IDs
+  - Backend selection
+  - Timeouts and failures
+  - Health state changes
+  - Latency measurements
 - Log rotation is enabled to prevent uncontrolled log file growth.
 
 ---
 
 ### Why build this when Nginx / ALB exist?
 
-- To understand how reverse proxies actually work
-- To learn async programming in Python
-- To understand load balancing, retries, and failures
+- To understand how reverse proxies work internally
+- To learn async networking with Python
+- To implement load balancing, retries, and health checks manually
+- To gain hands-on experience with observability and metrics
+- To understand graceful shutdown and reliability patterns
+
+--- 
 
 ## Configuration
 
@@ -83,8 +140,13 @@ LOG_DIR=logs
 LOG_LEVEL=INFO
 
 PROXY_PORT=8080
+
 BACKEND_1=http://127.0.0.1:9001
 BACKEND_2=http://127.0.0.1:9002
+
 MAX_RETRIES=2
+FAILURE_THRESHOLD=3
+HEALTH_COOLDOWN=20
+
 REQUEST_TIMEOUT_TOTAL=1.5
 REQUEST_TIMEOUT_CONNECT=0.5

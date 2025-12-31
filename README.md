@@ -73,3 +73,18 @@ This demonstrates how the proxy handles backend unavailability and ensures conti
 - To understand how reverse proxies actually work
 - To learn async programming in Python
 - To understand load balancing, retries, and failures
+
+## Configuration
+
+All configurable values are in the `.env` file:
+
+```env
+LOG_DIR=logs
+LOG_LEVEL=INFO
+
+PROXY_PORT=8080
+BACKEND_1=http://127.0.0.1:9001
+BACKEND_2=http://127.0.0.1:9002
+MAX_RETRIES=2
+REQUEST_TIMEOUT_TOTAL=1.5
+REQUEST_TIMEOUT_CONNECT=0.5

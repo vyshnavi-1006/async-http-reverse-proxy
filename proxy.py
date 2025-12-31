@@ -1,24 +1,32 @@
+import asyncio
 import time
 from aiohttp import web, ClientSession, ClientError, ClientTimeout
 from itertools import cycle
 
 from logger import setup_logger
 
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # loads variables from .env
+
 logger = setup_logger("proxy")
 
 BACKENDS = [
-    "http://127.0.0.1:9001",
-    "http://127.0.0.1:9002",
+    os.getenv("BACKEND_1", "http://127.0.0.1:9001"),
+    os.getenv("BACKEND_2", "http://127.0.0.1:9002"),
 ]
 
 backend_pool = cycle(BACKENDS)
-MAX_RETRIES = len(BACKENDS)
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", len(BACKENDS)))
 
 # TIMEOUT CONFIG
 TIMEOUT = ClientTimeout(
-    total=1.5,      # max time per backend request
-    connect=0.5     # max time to establish connection
+    total=float(os.getenv("REQUEST_TIMEOUT_TOTAL", 1.5)),
+    connect=float(os.getenv("REQUEST_TIMEOUT_CONNECT", 0.5))
 )
+
+PROXY_PORT = int(os.getenv("PROXY_PORT", 8080))
 
 
 async def proxy_handler(request):
@@ -55,8 +63,12 @@ async def proxy_handler(request):
                         headers=resp.headers
                     )
 
+        except asyncio.TimeoutError:
+            logger.warning(f"Backend timeout: {backend}")
+
         except ClientError as e:
             logger.error(f"Backend failed: {backend} | error={e}")
+
 
     duration_ms = (time.perf_counter() - start_time) * 1000
     logger.critical(
@@ -74,4 +86,4 @@ app.router.add_route("*", "/{tail:.*}", proxy_handler)
 
 if __name__ == "__main__":
     logger.info("Starting proxy server on port 8080")
-    web.run_app(app, host="127.0.0.1", port=8080)
+    web.run_app(app, host="127.0.0.1", port=PROXY_PORT)
